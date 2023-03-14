@@ -23,7 +23,7 @@ pub use disk::{OnDiskJSONMonitor, OnDiskTOMLMonitor};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::bolts::{current_time, format_duration_hms, ClientId};
+use crate::{bolts::{current_time, format_duration_hms, ClientId}, corpus::Corpus};
 
 #[cfg(feature = "afl_exec_sec")]
 const CLIENT_STATS_TIME_WINDOW_SECS: u64 = 5; // 5 seconds
@@ -637,6 +637,41 @@ impl From<usize> for PerfFeature {
             9 => PerfFeature::GetObjectivesInterestingAll,
             _ => panic!("Unknown PerfFeature: {val}"),
         }
+    }
+}
+
+/// Call the specific dbgr function
+#[macro_export]
+macro_rules! introspect_dbg {
+    ($state:expr, $($call_tokens:tt)*) => {{
+        if let Some(mut dbgr) = $state.take_introspection_debugger() {
+            dbgr$($call_tokens)*;
+            $state.set_introspection_debugger(dbgr);
+        }
+    }};
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+
+/// Client Debugger tools
+pub struct ClientDebugger {
+}
+
+impl ClientDebugger {
+    /// Create a blank ClientDebugger
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+           
+        }
+    }
+    /// Called when stepping into a new fuzz loop
+    pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C)
+    where
+        C: Corpus<Input = I>
+    {
+        // In this time, we can inspect & modify the Corpus
+        todo!();
     }
 }
 

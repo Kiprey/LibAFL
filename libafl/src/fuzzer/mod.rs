@@ -22,9 +22,9 @@ use crate::{
     observers::ObserversTuple,
     schedulers::Scheduler,
     stages::StagesTuple,
-    start_timer,
+    start_timer, introspect_dbg,
     state::{
-        HasClientPerfMonitor, HasCorpus, HasExecutions, HasFuzzedCorpusId, HasMetadata,
+        HasClientPerfMonitor, HasClientDebugger, HasCorpus, HasExecutions, HasFuzzedCorpusId, HasMetadata,
         HasSolutions, UsesState,
     },
     Error,
@@ -552,7 +552,7 @@ where
     EM: ProgressReporter + EventProcessor<E, Self, State = CS::State>,
     F: Feedback<CS::State>,
     OF: Feedback<CS::State>,
-    CS::State: HasClientPerfMonitor + HasExecutions + HasMetadata + HasFuzzedCorpusId,
+    CS::State: HasCorpus + HasClientPerfMonitor + HasClientDebugger + HasExecutions + HasMetadata + HasFuzzedCorpusId,
     ST: StagesTuple<E, EM, CS::State, Self>,
 {
     fn fuzz_one(
@@ -562,6 +562,8 @@ where
         state: &mut CS::State,
         manager: &mut EM,
     ) -> Result<CorpusId, Error> {
+        introspect_dbg!(state, .on_fuzzloop_start(state.corpus_mut()));
+
         // Init timer for scheduler
         #[cfg(feature = "introspection")]
         state.introspection_monitor_mut().start_timer();

@@ -23,7 +23,7 @@ use crate::{
     fuzzer::{Evaluator, ExecuteInputResult},
     generators::Generator,
     inputs::{Input, UsesInput},
-    monitors::ClientPerfMonitor,
+    monitors::{ClientPerfMonitor, ClientDebugger},
     Error,
 };
 
@@ -111,6 +111,15 @@ pub trait HasClientPerfMonitor {
 
     /// Mutatable ref to [`ClientPerfMonitor`]
     fn introspection_monitor_mut(&mut self) -> &mut ClientPerfMonitor;
+}
+
+/// Trait for offering a [`ClientDebugger`]
+pub trait HasClientDebugger {
+    /// [`ClientDebugger`] itself
+    fn take_introspection_debugger(&mut self) -> Option<ClientDebugger>;
+
+    /// Mutatable ref to [`ClientDebugger`]
+    fn set_introspection_debugger(&mut self, dbgr :ClientDebugger);
 }
 
 /// Trait for elements offering metadata
@@ -212,6 +221,7 @@ pub struct StdState<I, C, R, SC> {
     /// Performance statistics for this fuzzer
     #[cfg(feature = "introspection")]
     introspection_monitor: ClientPerfMonitor,
+    introspection_debugger: Option<ClientDebugger>,
     #[cfg(feature = "std")]
     /// Remaining initial inputs to load, if any
     remaining_initial_files: Option<Vec<PathBuf>>,
@@ -728,6 +738,7 @@ where
             fuzzed_corpus_id: None,
             #[cfg(feature = "introspection")]
             introspection_monitor: ClientPerfMonitor::new(),
+            introspection_debugger: Some(ClientDebugger::new()),
             #[cfg(feature = "std")]
             remaining_initial_files: None,
             phantom: PhantomData,
@@ -757,6 +768,16 @@ impl<I, C, R, SC> HasClientPerfMonitor for StdState<I, C, R, SC> {
 
     fn introspection_monitor_mut(&mut self) -> &mut ClientPerfMonitor {
         unimplemented!()
+    }
+}
+
+impl<I, C, R, SC> HasClientDebugger for StdState<I, C, R, SC> {
+    fn take_introspection_debugger(&mut self) -> Option<ClientDebugger> {
+        self.introspection_debugger.take()
+    }
+
+    fn set_introspection_debugger(&mut self, dbgr: ClientDebugger) {
+        self.introspection_debugger = Some(dbgr);
     }
 }
 
