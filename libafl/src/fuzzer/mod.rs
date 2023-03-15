@@ -447,7 +447,7 @@ where
     OT: ObserversTuple<CS::State> + Serialize + DeserializeOwned,
     F: Feedback<CS::State>,
     OF: Feedback<CS::State>,
-    CS::State: HasCorpus + HasSolutions + HasClientPerfMonitor + HasExecutions + HasFuzzedCorpusId,
+    CS::State: HasCorpus + HasSolutions + HasClientPerfMonitor + HasClientDebugger + HasExecutions + HasFuzzedCorpusId,
 {
     /// Process one input, adding to the respective corpora if needed and firing the right events
     #[inline]
@@ -467,6 +467,7 @@ where
         let observers = executor.observers();
 
         self.scheduler.on_evaluation(state, &input, observers)?;
+        introspect_dbg!(state, .on_evaluate_input(&input, observers));
 
         self.process_execution(state, manager, input, observers, &exit_kind, send_events)
     }
@@ -480,7 +481,7 @@ where
     F: Feedback<CS::State>,
     OF: Feedback<CS::State>,
     OT: ObserversTuple<CS::State> + Serialize + DeserializeOwned,
-    CS::State: HasCorpus + HasSolutions + HasClientPerfMonitor + HasExecutions + HasFuzzedCorpusId,
+    CS::State: HasCorpus + HasSolutions + HasClientPerfMonitor + HasClientDebugger + HasExecutions + HasFuzzedCorpusId,
 {
     /// Process one input, adding to the respective corpora if needed and firing the right events
     #[inline]

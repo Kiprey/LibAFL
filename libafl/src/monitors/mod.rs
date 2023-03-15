@@ -23,7 +23,7 @@ pub use disk::{OnDiskJSONMonitor, OnDiskTOMLMonitor};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::{bolts::{current_time, format_duration_hms, ClientId}, corpus::Corpus};
+use crate::{bolts::{current_time, format_duration_hms, ClientId}, corpus::Corpus, observers::ObserversTuple, inputs::{UsesInput, Input}};
 
 #[cfg(feature = "afl_exec_sec")]
 const CLIENT_STATS_TIME_WINDOW_SECS: u64 = 5; // 5 seconds
@@ -671,6 +671,24 @@ impl ClientDebugger {
         C: Corpus<Input = I>
     {
         // In this time, we can inspect & modify the Corpus
+        todo!();
+    }
+
+    /// Called when stepping into a new stage
+    pub fn on_stage_start(&mut self, _input :&mut Input)
+    {
+        // In this time, we can inspect & modify the input
+        todo!();
+    }
+
+    /// Called when evaluating input
+    pub fn on_evaluate_input<S, OT, I>(&mut self, _input: &I, _observer: &OT)
+    where
+        S: UsesInput,
+        OT: ObserversTuple<S>,
+        I: Input
+    {
+        // In this time, we can inspect the input and observers
         todo!();
     }
 }
