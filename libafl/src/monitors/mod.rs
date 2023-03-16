@@ -23,7 +23,12 @@ pub use disk::{OnDiskJSONMonitor, OnDiskTOMLMonitor};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::{bolts::{current_time, format_duration_hms, ClientId}, corpus::Corpus, observers::ObserversTuple, inputs::{UsesInput, Input}};
+use crate::{
+    bolts::{current_time, format_duration_hms, ClientId}, 
+    corpus::{Corpus, CorpusId}, 
+    observers::ObserversTuple, 
+    inputs::{UsesInput, Input}
+};
 
 #[cfg(feature = "afl_exec_sec")]
 const CLIENT_STATS_TIME_WINDOW_SECS: u64 = 5; // 5 seconds
@@ -666,16 +671,18 @@ impl ClientDebugger {
         }
     }
     /// Called when stepping into a new fuzz loop
-    pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C)
+    pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C, _next_idx: &mut Option<CorpusId>)
     where
         C: Corpus<Input = I>
     {
-        // In this time, we can inspect & modify the Corpus
+        // In this time, we can inspect & modify the Corpus & change next corpus id
         todo!();
     }
 
     /// Called when stepping into a new stage
-    pub fn on_stage_start(&mut self, _input :&mut Input)
+    pub fn on_stage_start<I, C>(&mut self, _input :&mut C, _input_idx: CorpusId)
+    where
+        C: Corpus<Input = I>
     {
         // In this time, we can inspect & modify the input
         todo!();

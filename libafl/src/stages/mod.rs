@@ -56,6 +56,9 @@ use core::{convert::From, marker::PhantomData};
 pub use dump::*;
 
 use self::push::PushStage;
+use crate::introspect_dbg;
+use crate::prelude::HasClientDebugger;
+use crate::prelude::HasCorpus;
 use crate::{
     corpus::CorpusId,
     events::{EventFirer, EventRestarter, HasEventManagerId, ProgressReporter},
@@ -110,16 +113,17 @@ where
     E: UsesState<State = S>,
     EM: UsesState<State = S>,
     Z: UsesState<State = S>,
-    S: UsesInput,
+    S: UsesInput + HasCorpus + HasClientDebugger,
 {
     fn perform_all(
         &mut self,
         _: &mut Z,
         _: &mut E,
-        _: &mut S,
+        state: &mut S,
         _: &mut EM,
-        _: CorpusId,
+        corpus_idx: CorpusId,
     ) -> Result<(), Error> {
+        introspect_dbg!(state, .on_stage_start(state.corpus_mut(), corpus_idx));
         Ok(())
     }
 }
@@ -131,6 +135,7 @@ where
     E: UsesState<State = Head::State>,
     EM: UsesState<State = Head::State>,
     Z: UsesState<State = Head::State>,
+    Head::State: HasCorpus + HasClientDebugger,
 {
     fn perform_all(
         &mut self,
@@ -140,6 +145,8 @@ where
         manager: &mut EM,
         corpus_idx: CorpusId,
     ) -> Result<(), Error> {
+        introspect_dbg!(state, .on_stage_start(state.corpus_mut(), corpus_idx));
+        
         // Perform the current stage
         self.0
             .perform(fuzzer, executor, state, manager, corpus_idx)?;

@@ -563,14 +563,18 @@ where
         state: &mut CS::State,
         manager: &mut EM,
     ) -> Result<CorpusId, Error> {
-        introspect_dbg!(state, .on_fuzzloop_start(state.corpus_mut()));
+        let mut next_idx = None;
+        introspect_dbg!(state, .on_fuzzloop_start(state.corpus_mut(), &mut next_idx));
 
         // Init timer for scheduler
         #[cfg(feature = "introspection")]
         state.introspection_monitor_mut().start_timer();
 
         // Get the next index from the scheduler
-        let idx = self.scheduler.next(state)?;
+        let idx = match next_idx {
+            Some(inner) => inner,
+            _ => self.scheduler.next(state)?
+        };
 
         // Mark the elapsed time for the scheduler
         #[cfg(feature = "introspection")]
