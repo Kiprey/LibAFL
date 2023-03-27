@@ -15,8 +15,8 @@ pub use prometheus::PrometheusMonitor;
 
 #[cfg(feature = "std")]
 pub mod disk;
-use alloc::{fmt::Debug, string::String, vec::Vec};
-use core::{fmt, fmt::Write, time::Duration};
+use alloc::{fmt::Debug, string::String, vec::Vec, sync::Arc};
+use core::{fmt, fmt::Write, time::Duration, sync::atomic::AtomicBool};
 
 #[cfg(feature = "std")]
 pub use disk::{OnDiskJSONMonitor, OnDiskTOMLMonitor};
@@ -29,6 +29,10 @@ use crate::{
     observers::ObserversTuple, 
     inputs::{UsesInput, Input}
 };
+
+use std::borrow::ToOwned;
+use std::sync::atomic::Ordering;
+use rustyline::{error::ReadlineError, Editor, history::FileHistory, DefaultEditor};
 
 #[cfg(feature = "afl_exec_sec")]
 const CLIENT_STATS_TIME_WINDOW_SECS: u64 = 5; // 5 seconds
@@ -656,27 +660,91 @@ macro_rules! introspect_dbg {
     }};
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+lazy_static::lazy_static! {
+    static ref STOP_ON_NEXT_ROUND: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+}
+
+extern "C" fn signal_handler(_: i32) {
+    println!("Received SIGQUIT signal, try to stop dbgr on next fuzz loop...");
+    STOP_ON_NEXT_ROUND.store(true, Ordering::Relaxed);
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 
 /// Client Debugger tools
 pub struct ClientDebugger {
+    #[serde(skip_serializing, skip_deserializing)]
+    rustyline: Option<Editor<(), FileHistory>>,
+    continue_cur_round: bool,
+}
+
+impl Clone for ClientDebugger {
+    fn clone(&self) -> Self {
+        Self {
+            rustyline: None,
+            continue_cur_round: false,
+        }
+    }
 }
 
 impl ClientDebugger {
     /// Create a blank ClientDebugger
     #[must_use]
     pub fn new() -> Self {
+        let rustyline = DefaultEditor::new()
+                .map(|editor| Some(editor))
+                .unwrap_or(None);
+        
+        unsafe {
+            use nix::sys::signal;
+            let sig_action = signal::SigAction::new(
+                signal::SigHandler::Handler(signal_handler),
+                signal::SaFlags::SA_SIGINFO,
+                signal::SigSet::empty(),
+            );
+            signal::sigaction(signal::Signal::SIGQUIT, &sig_action)
+                .expect("Error setting signal handler");
+        }
+        
         Self {
-           
+            rustyline,
+            continue_cur_round: false,
         }
     }
+
+    fn readline(&mut self) -> rustyline::Result<Vec<String>>{
+        let mut words: Vec<String> = Vec::new();
+        if let Some(rl) = &mut self.rustyline {
+            match rl.readline("dbgr> ") {
+                Ok(line) => {
+                    rl.add_history_entry(&line)?;
+    
+                    words = line.split_whitespace().map(|word| word.to_owned()).collect();
+                }
+                Err(ReadlineError::Interrupted) => {
+                    println!("CTRL-C");
+                }
+                Err(ReadlineError::Eof) => {
+                    println!("CTRL-D");
+                }
+                Err(error) => {
+                    println!("Error: {:?}", error);
+                }
+            }
+        }
+        Ok(words)
+    }
+
     /// Called when stepping into a new fuzz loop
     pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C, _next_idx: &mut Option<CorpusId>)
     where
         C: Corpus<Input = I>
     {
+        if STOP_ON_NEXT_ROUND.load(Ordering::Relaxed) {
+            self.continue_cur_round = true;
+        }
         // In this time, we can inspect & modify the Corpus & change next corpus id
-        todo!();
+        
     }
 
     /// Called when stepping into a new stage
@@ -685,7 +753,9 @@ impl ClientDebugger {
         C: Corpus<Input = I>
     {
         // In this time, we can inspect & modify the input
-        todo!();
+        if !self.continue_cur_round {
+            return;
+        }
     }
 
     /// Called when evaluating input
@@ -696,7 +766,9 @@ impl ClientDebugger {
         I: Input
     {
         // In this time, we can inspect the input and observers
-        todo!();
+        if !self.continue_cur_round {
+            return;
+        }
     }
 }
 
