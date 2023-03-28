@@ -15,7 +15,7 @@ pub use prometheus::PrometheusMonitor;
 
 #[cfg(feature = "std")]
 pub mod disk;
-use alloc::{fmt::Debug, string::String, vec::Vec, sync::Arc};
+use alloc::{fmt::Debug, string::{String, ToString}, vec::Vec, sync::Arc, boxed::Box};
 use core::{fmt, fmt::Write, time::Duration, sync::atomic::AtomicBool};
 
 #[cfg(feature = "std")]
@@ -712,14 +712,15 @@ impl ClientDebugger {
         }
     }
 
-    fn readline(&mut self) -> rustyline::Result<Vec<String>>{
+    fn readline(&mut self) -> Option<Vec<String>>{
         let mut words: Vec<String> = Vec::new();
         if let Some(rl) = &mut self.rustyline {
             match rl.readline("dbgr> ") {
                 Ok(line) => {
-                    rl.add_history_entry(&line)?;
+                    rl.add_history_entry(&line).expect("Cannot add history");
     
                     words = line.split_whitespace().map(|word| word.to_owned()).collect();
+                    return Some(words);
                 }
                 Err(ReadlineError::Interrupted) => {
                     println!("CTRL-C");
@@ -732,19 +733,74 @@ impl ClientDebugger {
                 }
             }
         }
-        Ok(words)
+        None
+    }
+    
+    fn interact<H>(&mut self, mut commands: HashMap<&str, (&str, H)>)
+        where H: FnMut(&[String]) -> Result<(), String>
+    {
+        loop {
+            let opt_words = self.readline();
+            if opt_words.is_none() {
+                return;
+            }
+            let words = opt_words.unwrap();
+            if words.len() > 0 {
+                let cmd = &words[0];
+                let args = &words[1..];
+                match cmd.as_str() {
+                    "continue" => {
+                        STOP_ON_NEXT_ROUND.store(false, Ordering::Relaxed);
+                        self.continue_cur_round = false;
+                        return;
+                    },
+                    "next" => {
+                        return;
+                    },
+                    "help" => {
+                        println!("[dbgr] ========== Help ==========");
+                        println!("[dbgr] continue: Continue run until next SIGQUIT");
+                        println!("[dbgr] next: Run to next breakpoint");
+                        for (cmd, (desc, _)) in &commands {
+                            println!("[dbgr] {}: {}", cmd, desc);
+                        }
+                    },
+                    cmd_str => match commands.get_mut(cmd_str) {
+                        Some((_, func)) => {
+                            if let Err(err) = func(args) {
+                                println!("[dbgr ERROR] {}", err)
+                            }
+                        },
+                        None => println!("[dbgr ERROR] No such cmd: {}", cmd)
+                    }
+                }
+            }
+        }
     }
 
     /// Called when stepping into a new fuzz loop
-    pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C, _next_idx: &mut Option<CorpusId>)
+    pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C, next_idx: &mut Option<CorpusId>)
     where
         C: Corpus<Input = I>
     {
-        if STOP_ON_NEXT_ROUND.load(Ordering::Relaxed) {
-            self.continue_cur_round = true;
+        if !STOP_ON_NEXT_ROUND.load(Ordering::Relaxed) {
+            return;
         }
+        self.continue_cur_round = true;
+
         // In this time, we can inspect & modify the Corpus & change next corpus id
-        
+        let commands: HashMap<&str, (&str, _)> = HashMap::from([
+            ("set_next_seed", ("Set next seed index.", |args: &[String]| -> Result<(), String> {
+                let idx: usize = args.get(0)
+                    .ok_or("Failed to get first number")?
+                    .parse::<usize>()
+                    .map_err(|e| e.to_string())?;
+                *next_idx = Some(CorpusId(idx));
+                println!("[dbgr INFO] Set next_idx to {}", idx);
+                Ok(())
+            })),
+        ]);
+        self.interact(commands);
     }
 
     /// Called when stepping into a new stage
