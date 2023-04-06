@@ -16,7 +16,7 @@ pub use prometheus::PrometheusMonitor;
 #[cfg(feature = "std")]
 pub mod disk;
 use alloc::{fmt::Debug, string::{String, ToString}, vec::Vec, sync::Arc, boxed::Box};
-use core::{fmt, fmt::Write, time::Duration, sync::atomic::AtomicBool};
+use core::{fmt, fmt::Write, time::Duration, sync::atomic::AtomicBool, cell::RefCell};
 
 #[cfg(feature = "std")]
 pub use disk::{OnDiskJSONMonitor, OnDiskTOMLMonitor};
@@ -779,26 +779,126 @@ impl ClientDebugger {
     }
 
     /// Called when stepping into a new fuzz loop
-    pub fn on_fuzzloop_start<I, C>(&mut self, _corpus: &mut C, next_idx: &mut Option<CorpusId>)
+    pub fn on_fuzzloop_start<I, C>(&mut self, corpus: &mut C, next_idx: &mut Option<CorpusId>)
     where
-        C: Corpus<Input = I>
+        C: Corpus<Input = I>,
+        I: Input,
     {
         if !STOP_ON_NEXT_ROUND.load(Ordering::Relaxed) {
             return;
         }
         self.continue_cur_round = true;
 
+
+        let corpus = RefCell::new(corpus);
+        let set_next_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            *next_idx = Some(CorpusId(idx));
+            println!("[dbgr INFO] Set next_idx to {}", idx);
+            Ok(())
+        });
+
+        let get_corpus_count_func: Box<dyn FnMut(&[String]) -> Result<(), String >> = Box::new(|_args: &[String]| -> Result<(), String> {
+            println!("[dbgr INFO] Total seeds counts is {}", corpus.borrow().count());
+            Ok(())
+        });
+
+        // let testcase = None;
+        let get_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            let testcase = corpus.borrow().get(CorpusId(idx)).map_err(|e| e.to_string())?.to_owned();
+            println!("[dbgr INFO] Get corpus successfully: {:?}", testcase.borrow());
+            Ok(())
+        });
+        let add_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let path = args.get(0)
+                .ok_or("Failed to get first path")?;
+            
+            let input  = I::from_file(path).map_err(|e| e.to_string())?;
+            let idx = corpus.borrow_mut().add(input.into()).map_err(|e| e.to_string())?;
+
+            println!("[dbgr INFO] Add corpus successfully, corpusid: {}", idx);
+            Ok(())
+        });
+
+        let del_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            corpus.borrow_mut().remove(CorpusId(idx)).map_err(|e| e.to_string())?;
+            println!("[dbgr INFO] Remove corpus successfully");
+            Ok(())
+        });
+
+        let get_next_corpus_id_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            let res = corpus.borrow().next(CorpusId(idx));
+            println!("[dbgr INFO] next corpus id: {:?}", res);
+            Ok(())
+        });
+        
+        let get_prev_corpus_id_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            let res = corpus.borrow().prev(CorpusId(idx));
+            println!("[dbgr INFO] prev corpus id: {:?}", res);
+            Ok(())
+        });
+
+        let get_first_corpus_id_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|_args: &[String]| -> Result<(), String> {
+            let res = corpus.borrow().first();
+            println!("[dbgr INFO] first corpus id: {:?}", res);
+            Ok(())
+        });
+
+        let get_last_corpus_id_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|_args: &[String]| -> Result<(), String> {
+            let res = corpus.borrow().last();
+            println!("[dbgr INFO] last corpus id: {:?}", res);
+            Ok(())
+        });
+
+        let get_nth_corpus_id_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            let res = corpus.borrow().nth(idx);
+            println!("[dbgr INFO] nth corpus id: {:?}", res);
+            Ok(())
+        });
+
+         // Replaces the testcase at the given idx, returning the existing.
+    // fn replace(
+    //     &mut self,
+    //     idx: CorpusId,
+    //     testcase: Testcase<Self::Input>,
+    // ) -> Result<Testcase<Self::Input>, Error>;
+
+
         // In this time, we can inspect & modify the Corpus & change next corpus id
-        let commands: HashMap<&str, (&str, _)> = HashMap::from([
-            ("set_next_seed", ("Set next seed index.", |args: &[String]| -> Result<(), String> {
-                let idx: usize = args.get(0)
-                    .ok_or("Failed to get first number")?
-                    .parse::<usize>()
-                    .map_err(|e| e.to_string())?;
-                *next_idx = Some(CorpusId(idx));
-                println!("[dbgr INFO] Set next_idx to {}", idx);
-                Ok(())
-            })),
+        let commands: HashMap<&str, (&str, Box<dyn FnMut(&[String]) -> Result<(), String>>)> = HashMap::from([
+            ("set_next_corpus", ("Set next corpus index.(idx: usize)", set_next_corpus_func)),
+            ("get_corpus_count", ("Get the corpus count.", get_corpus_count_func)),
+            ("get_corpus", ("Get the specific corpus.(idx: usize)", get_corpus_func)),
+            ("add_corpus", ("Add new corpus.(idx: usize)", add_corpus_func)),
+            ("del_corpus", ("Remove the specific corpus.(idx: usize)", del_corpus_func)),
+            ("get_next_corpus_id", ("Get the next corpus id.(idx: usize)", get_next_corpus_id_func)),
+            ("get_prev_corpus_id", ("Get the prev corpus id.(idx: usize)", get_prev_corpus_id_func)),
+            ("get_first_corpus_id", ("Get the first corpus id.", get_first_corpus_id_func)),
+            ("get_last_corpus_id", ("Get the last corpus id.", get_last_corpus_id_func)),
+            ("get_nth_corpus_id", ("Get the nth seed count.(idx: usize)", get_nth_corpus_id_func)),
         ]);
         self.interact(commands);
     }
