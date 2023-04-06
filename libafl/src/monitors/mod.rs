@@ -16,7 +16,7 @@ pub use prometheus::PrometheusMonitor;
 #[cfg(feature = "std")]
 pub mod disk;
 use alloc::{fmt::Debug, string::{String, ToString}, vec::Vec, sync::Arc, boxed::Box};
-use core::{fmt, fmt::Write, time::Duration, sync::atomic::AtomicBool, cell::RefCell};
+use core::{fmt, fmt::Write, time::Duration, sync::atomic::AtomicBool, cell::RefCell, borrow::{BorrowMut, Borrow}};
 
 #[cfg(feature = "std")]
 pub use disk::{OnDiskJSONMonitor, OnDiskTOMLMonitor};
@@ -816,6 +816,29 @@ impl ClientDebugger {
             println!("[dbgr INFO] Get corpus successfully: {:?}", testcase.borrow());
             Ok(())
         });
+        let save_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let idx: usize = args.get(0)
+                .ok_or("Failed to get first number")?
+                .parse::<usize>()
+                .map_err(|e| e.to_string())?;
+            let path = args.get(1)
+                .ok_or("Failed to get path")?;
+
+            let corpus = corpus.borrow();
+            let input_opt = corpus
+                .get(CorpusId(idx))
+                .map_err(|e| e.to_string())?
+                .borrow_mut();
+            match input_opt.input() {
+                Some(input) => {
+                    input.to_file(path).map_err(|e| e.to_string())?;
+                    println!("[dbgr INFO] Save corpus successfully");
+                },
+                None => println!("[dbgr INFO] Cannot find specific corpus"),
+            }
+
+            Ok(())
+        });
         let add_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
             let path = args.get(0)
                 .ok_or("Failed to get first path")?;
@@ -879,20 +902,13 @@ impl ClientDebugger {
             Ok(())
         });
 
-         // Replaces the testcase at the given idx, returning the existing.
-    // fn replace(
-    //     &mut self,
-    //     idx: CorpusId,
-    //     testcase: Testcase<Self::Input>,
-    // ) -> Result<Testcase<Self::Input>, Error>;
-
-
         // In this time, we can inspect & modify the Corpus & change next corpus id
         let commands: HashMap<&str, (&str, Box<dyn FnMut(&[String]) -> Result<(), String>>)> = HashMap::from([
             ("set_next_corpus", ("Set next corpus index.(idx: usize)", set_next_corpus_func)),
             ("get_corpus_count", ("Get the corpus count.", get_corpus_count_func)),
             ("get_corpus", ("Get the specific corpus.(idx: usize)", get_corpus_func)),
-            ("add_corpus", ("Add new corpus.(idx: usize)", add_corpus_func)),
+            ("save_corpus", ("Save the specific corpus.(idx: usize, path: str)", save_corpus_func)),
+            ("add_corpus", ("Add new corpus.(path: str)", add_corpus_func)),
             ("del_corpus", ("Remove the specific corpus.(idx: usize)", del_corpus_func)),
             ("get_next_corpus_id", ("Get the next corpus id.(idx: usize)", get_next_corpus_id_func)),
             ("get_prev_corpus_id", ("Get the prev corpus id.(idx: usize)", get_prev_corpus_id_func)),
@@ -904,14 +920,50 @@ impl ClientDebugger {
     }
 
     /// Called when stepping into a new stage
-    pub fn on_stage_start<I, C>(&mut self, _input :&mut C, _input_idx: CorpusId)
+    pub fn on_stage_start<I, C>(&mut self, corpus :&mut C, input_idx: CorpusId)
     where
-        C: Corpus<Input = I>
+        C: Corpus<Input = I>,
+        I: Input,
     {
         // In this time, we can inspect & modify the input
         if !self.continue_cur_round {
             return;
         }
+
+        let corpus = RefCell::new(corpus);
+        let replace_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let path = args.get(0)
+                .ok_or("Failed to get first path")?;
+            
+            let input  = I::from_file(path).map_err(|e| e.to_string())?;
+            let idx = corpus.borrow_mut().add(input.into()).map_err(|e| e.to_string())?;
+
+            println!("[dbgr INFO] Add corpus successfully, corpusid: {}", idx);
+            Ok(())
+        });
+        let dump_corpus_func: Box<dyn FnMut(&[String]) -> Result<(), String>> = Box::new(|args: &[String]| -> Result<(), String> {
+            let path = args.get(0)
+                .ok_or("Failed to get path")?;
+
+            let corpus = corpus.borrow();
+            let testcase = corpus.get(input_idx).map_err(|e| e.to_string())?.borrow();
+            match testcase.input() {
+                Some(input) => {
+                    input.to_file(path).map_err(|e| e.to_string())?;
+                    println!("[dbgr INFO] Save corpus successfully");
+                },
+                None => println!("[dbgr INFO] Cannot find specific corpus"),
+            }
+
+            Ok(())
+        });
+
+        let commands: HashMap<&str, (&str, Box<dyn FnMut(&[String]) -> Result<(), String>>)> = HashMap::from([
+            ("replace_corpus", ("Replace the corpus into current corpus. (path: str)", replace_corpus_func)),
+            ("dump_corpus_count", ("Get the corpus count.(path: str)", dump_corpus_func)),
+        ]);
+        self.interact(commands);
+        
     }
 
     /// Called when evaluating input
